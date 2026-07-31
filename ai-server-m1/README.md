@@ -61,7 +61,9 @@ cp .env.example .env
 ## 실행
 
 ```bash
-uvicorn app.main:app --reload --port 8000
+cd C:\dogether_project\ai-server-m1
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 - 헬스 체크: `GET http://localhost:8000/health`
