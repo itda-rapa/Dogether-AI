@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.routes import meeting
+from app.routes import meeting, meeting_v2
 
 
 def create_app() -> FastAPI:
@@ -24,11 +24,16 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="M1: 대화에서 약속 카드 초안을 뽑아내는 AI 서버",
+        description=(
+            "대화에서 약속 카드 초안을 뽑아내는 AI 서버 "
+            "(v1: 1:1 대화 · v2: 단체 채팅방)"
+        ),
     )
 
     # 약속 찾기 기능(주소들)을 서버에 붙입니다.
+    # v1 = 1:1 대화용, v2 = 단체 채팅방(3명 이상)용. 어느 쪽을 부를지는 백엔드가 정합니다.
     app.include_router(meeting.router)
+    app.include_router(meeting_v2.router)
 
     # 서버가 잘 살아있는지 확인하는 간단한 주소입니다.
     # 브라우저에서 /health 로 들어가면 "ok" 라고 답해 줍니다.

@@ -72,6 +72,30 @@ NODE 6 OUTPUT        list[MeetingDraft] (API 응답과 동일)
 [모델/기술 단서]     model id / 토큰 / 캐싱 / 추론 노출 / system_fingerprint 등
 ```
 
+## 사례 채점기 (별도 도구)
+
+같은 폴더에 **실제 Gemma 로 사례를 채점하는 스크립트**가 함께 있습니다.
+`pipeline_trace.py` 가 한 건을 자세히 보는 도구라면, 이쪽은 여러 건을 한꺼번에
+돌려 성공률을 재는 도구입니다.
+
+| 스크립트 | 데이터 | 채점 대상 |
+| --- | --- | --- |
+| `run_200.py` | `dataset_200.py` (1:1, 200건) | 종류·날짜·시각·장소 |
+| `run_group.py` | `dataset_group.py` (단체 채팅방, 30건) | 위 네 항목 + **참여자** |
+
+```powershell
+# 단체 채팅방(v2) 전체 채점
+.\.venv\Scripts\python.exe tests\cli_debug_test\run_group.py
+
+# 정족수(Q) 그룹만 빠르게
+.\.venv\Scripts\python.exe tests\cli_debug_test\run_group.py --category Q
+```
+
+`run_group.py` 는 `extract_meeting_drafts_v2` 를 그대로 호출하므로 이름표
+붙이기·떼기와 정족수 판정까지 **운영과 똑같은 경로**를 지납니다. 참여자는
+순서를 무시하고 집합으로 비교합니다. 결과는 기본적으로
+`docs/PROMPT_TEST_RESULT_GROUP.md` 에 저장됩니다.
+
 ## 참고
 
 - 이 도구는 NODE 3 에서 풍부한 응답 객체(추론·토큰)를 보려고 **OpenAI 클라이언트를
