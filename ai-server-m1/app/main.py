@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.routes import meeting, meeting_v2
+from app.routes import meeting, meeting_v2, place_intent
 
 
 def create_app() -> FastAPI:
@@ -25,8 +25,8 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description=(
-            "대화에서 약속 카드 초안을 뽑아내는 AI 서버 "
-            "(v1: 1:1 대화 · v2: 단체 채팅방)"
+            "대화에서 약속 카드 초안을 뽑아내고, 병원/약국 팝업을 띄울지 "
+            "판단하는 AI 서버 (약속 v1: 1:1 대화 · v2: 단체 채팅방)"
         ),
     )
 
@@ -34,6 +34,10 @@ def create_app() -> FastAPI:
     # v1 = 1:1 대화용, v2 = 단체 채팅방(3명 이상)용. 어느 쪽을 부를지는 백엔드가 정합니다.
     app.include_router(meeting.router)
     app.include_router(meeting_v2.router)
+
+    # 지도 팝업을 띄울지 판단하는 창구입니다. (M2_FLOW B-2)
+    # 지도 검색 자체는 백엔드가 하고 이 서버를 거치지 않습니다. 좌표는 오지 않습니다.
+    app.include_router(place_intent.router)
 
     # 서버가 잘 살아있는지 확인하는 간단한 주소입니다.
     # 브라우저에서 /health 로 들어가면 "ok" 라고 답해 줍니다.

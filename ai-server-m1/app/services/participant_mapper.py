@@ -45,13 +45,16 @@ _LABEL_RE = re.compile(r"^P([1-9]\d*)$")
 # 흔한 줄바꿈뿐 아니라 유니코드 줄 구분자(U+0085, U+2028, U+2029)까지 함께 막습니다.
 # 이 글자들도 화면에서는 줄이 바뀌어 보이므로, 빼놓으면 위조를 막지 못합니다.
 _LINE_BREAKS_RE = re.compile("[\r\n\v\f\u0085\u2028\u2029]+")
+# MAX 인원수 잡을 필요성이 있음 (예로 들어 10명)
 
 
 class ParticipantMappingError(ValueError):
     """명부(참여자 목록)가 규칙에 맞지 않을 때 쓰는 오류 표시입니다. (-> 400)"""
-
-
 @dataclass(frozen=True)
+# MappingProxyType을 감싸야 한다는 것.
+# Hash라는 것은 무엇인가? (확인 필요)
+
+
 class ParticipantMap:
     """이름표 대응표입니다. 붙일 때와 뗄 때 양쪽 방향을 모두 가지고 있습니다.
 
@@ -73,22 +76,34 @@ class ParticipantMap:
         """["P1", "P2", "P3", "P4"] 처럼 이름표만 순서대로 돌려줍니다."""
 
         return list(self.label_to_id)
+    # size / labels 가 서로 다른 표를 본다는 것 (여기서 어떻게 처리할 것인가?)
+    # 별도로 ParticipantMap을 만들어야한다는 것에 대한 의미 (아무 오류없이 진행이 된다고?)
 
 
-def build_participant_map(user_ids: Sequence[str]) -> ParticipantMap:
+
+def build_participant_map(
+    user_ids: Sequence[str],
+    min_size: int = MIN_PARTICIPANTS,
+) -> ParticipantMap:
     """명부(사용자 ID 목록)를 받아서 이름표 대응표를 만듭니다.
 
     이름표는 받은 순서대로 P1, P2, P3 … 로 붙습니다.
 
+    min_size 는 '몇 명 이상이어야 통과인가' 입니다. 기본값은 단체 채팅방 기준인
+    3명이고, 약속 추출(v2)은 이 기본값을 그대로 씁니다. 지도 팝업 판단(B-2)은
+    1:1 방에서도 떠야 하므로 2를 넘겨서 씁니다. 인원 기준이 기능마다 다른 것이지
+    이름표를 붙이는 방법이 다른 것이 아니라서, 모듈을 나누지 않고 값만 받습니다.
+
     다음 경우에는 ParticipantMappingError 를 냅니다. (-> 400)
-    - 명부가 3명 미만일 때 (단체 채팅방이 아님. 백엔드가 v1 으로 보내야 함)
+    - 명부가 min_size 명 미만일 때
     - 명부에 빈 ID 가 있을 때
     - 같은 ID 가 두 번 들어있을 때 (누가 누군지 되돌릴 수 없게 됨)
     """
 
     cleaned: List[str] = []
     for raw in user_ids:
-        user_id = str(raw).strip()
+        user_id = str(raw).strip()  
+        #raw = None이면 흐름 파악 1번 확인 필요, sender_id에 보이지 않는 문자가 섞으면 매핑이 실패  
         if not user_id:
             raise ParticipantMappingError("명부에 빈 사용자 ID 가 있어요.")
         if user_id in cleaned:
@@ -97,25 +112,34 @@ def build_participant_map(user_ids: Sequence[str]) -> ParticipantMap:
             )
         cleaned.append(user_id)
 
-    if len(cleaned) < MIN_PARTICIPANTS:
+    if len(cleaned) < min_size:
+        hint = " — 2명 이하는 v1 을 쓰세요." if min_size == MIN_PARTICIPANTS else ""
         raise ParticipantMappingError(
-            f"단체 채팅방은 최소 {MIN_PARTICIPANTS}명이어야 해요. "
-            f"(받은 명부: {len(cleaned)}명 — 2명 이하는 v1 을 쓰세요.)"
+            f"참여자가 최소 {min_size}명이어야 해요. "
+            f"(받은 명부: {len(cleaned)}명{hint})"
         )
 
     id_to_label = {user_id: f"P{i}" for i, user_id in enumerate(cleaned, start=1)}
     label_to_id = {label: user_id for user_id, label in id_to_label.items()}
     return ParticipantMap(id_to_label=id_to_label, label_to_id=label_to_id)
 
+_LABEL_LIKE_RE = re.compile(r"\bP\d+\s*:")
 
 def sanitize_content(content: str) -> str:
-    """메시지 내용에서 줄바꿈을 없애 '한 메시지 = 한 줄' 을 보장합니다.
+    text = _LINE_BREAKS_RE.sub(" ", content)
+    text = _LABEL_LIKE_RE.sub("P#", text)   # "P2:" → "P#"
+    return " ".join(text.split())            # 내부 공백까지 한 칸으로
 
-    이것이 대화 위조를 막는 장치입니다. 줄바꿈이 사라지므로 사용자가 쓴 글이
-    새로운 발언 줄을 만들어낼 수 없습니다.
-    """
+# def sanitize_content(content: str) -> str:
+#     # 가장 큰 핵심이자 허점
+#     # --------------------- 대화 끝 ----------------  (구분자도 한 줄 필요성)
+#     """메시지 내용에서 줄바꿈을 없애 '한 메시지 = 한 줄' 을 보장합니다.
 
-    return _LINE_BREAKS_RE.sub(" ", content).strip()
+#     이것이 대화 위조를 막는 장치입니다. 줄바꿈이 사라지므로 사용자가 쓴 글이
+#     새로운 발언 줄을 만들어낼 수 없습니다.
+#     """
+
+#     return _LINE_BREAKS_RE.sub(" ", content).strip()
 
 
 def to_labeled_lines(
