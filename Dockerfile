@@ -9,7 +9,7 @@ WORKDIR /app
 RUN python -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-COPY ai-server-m1/requirements.txt .
+COPY ai-server-m1/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -26,8 +26,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY . .
+COPY ai-server-m1/ /app/
 
 EXPOSE 5000
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
