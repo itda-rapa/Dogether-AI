@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
+
 from pydantic import BaseModel, Field, field_validator
 
 # 약속 종류 코드는 이 네 가지 중 하나만 허용합니다.
@@ -23,7 +24,7 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 class Message(BaseModel):
     """대화 한 줄입니다. '누가(sender)' '무슨 말(content)' 을 '언제(sent_at)' 했는지 담습니다."""
-
+    
     sender: str = Field(..., description="말한 사람", examples=["초코 보호자"])
     content: str = Field(..., description="한 말", examples=["내일 저녁 7시에 중앙공원에서 산책할까요?"])
     # 보낸 시각. "2026-07-24T18:00:00+09:00" 같은 형식이면 자동으로 인식합니다.
@@ -33,7 +34,7 @@ class Message(BaseModel):
     @field_validator("sender", "content")
     @classmethod
     def _not_blank(cls, value: str) -> str:
-        if not value or not value.strip():
+        if not value.strip():
             raise ValueError("빈 칸은 넣을 수 없어요.")
         return value.strip()  # 앞뒤 공백은 잘라냅니다.
 
@@ -65,8 +66,6 @@ class MeetingDraftRequest(BaseModel):
         if not _DATE_RE.match(value):
             raise ValueError("reference_date 는 YYYY-MM-DD 형식이어야 해요.")
         return value
-
-
 class MeetingDraft(BaseModel):
     """대화에서 뽑아낸 '약속 카드 초안' 입니다. (네 가지 항목만 담습니다)"""
 
