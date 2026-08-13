@@ -1,0 +1,60 @@
+name: ci-cd.yml
+on:
+  push:
+    branches:
+      - main
+env:
+  REGISTRY: ghcr.io
+jobs:
+  tagging:
+    name: 태깅 수행
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ steps.tag_version.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: 버저닝 및 태깅
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.tag_version.outputs.new_tag }}
+          name: ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+  build-push-image:
+    name: 도커이미지 빌드 및 푸시
+    runs-on: ubuntu-latest
+    needs: tagging
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Repository로부터 Worker Instance로 파일을 checkout
+        uses: actions/checkout@v6
+        # 도커 레지스트리 ( GHCR ) 로그인
+      - name: 레지스트리 ( GHCR ) 로그인
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 메타데이터 추출
+        uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.tagging.outputs.tag_name }}
+            type=raw,value=latest
+      - name: 빌드 및 이미지 푸시 수행 ( Step 6의 태깅을 기반으로 도커이미지에 태깅 적용 )
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          # Step 6의 with에 정의한 산출물 : tags로서 설정
+          tags: ${{ steps.meta.outputs.tags }}
