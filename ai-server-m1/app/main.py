@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.routes import meeting, meeting_v2, place_intent
+from app.routes import meeting, meeting_v2, place_intent, risk_signal
 
 
 def create_app() -> FastAPI:
@@ -38,6 +38,10 @@ def create_app() -> FastAPI:
     # 지도 팝업을 띄울지 판단하는 창구입니다. (M2_FLOW B-2)
     # 지도 검색 자체는 백엔드가 하고 이 서버를 거치지 않습니다. 좌표는 오지 않습니다.
     app.include_router(place_intent.router)
+
+    # 규칙 필터에 걸린 메시지를 맥락과 함께 판단하는 창구입니다. (M3_FLOW 5-3 ②)
+    # 규칙에 걸린 것만 여기로 옵니다. 상시 감시가 아닙니다. (5-6 원칙 4)
+    app.include_router(risk_signal.router)
 
     # 서버가 잘 살아있는지 확인하는 간단한 주소입니다.
     # 브라우저에서 /health 로 들어가면 "ok" 라고 답해 줍니다.
