@@ -9,7 +9,7 @@
 
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from app.logging_config import get_logger
@@ -137,17 +137,55 @@ def _normalize_type(value) -> Optional[str]:
     return _TYPE_CODES.get(text.lower())
 
 
-def _normalize_date(value) -> Optional[str]:
-    """날짜가 진짜 'YYYY-MM-DD' 형식인지 확인합니다. 아니면 None."""
+def _parse_reference_date(reference_date: Optional[str]) -> Optional[date]:
+    """기준일 문자열을 날짜로 바꿉니다. 없거나 형식이 틀리면 None.
+
+    None 을 돌려주면 과거 날짜 검사를 건너뜁니다. 기준일이 이상하다고 해서
+    멀쩡한 날짜까지 버리면, 원인이 기준일에 있는데 카드 쪽에서 문제를 찾게
+    됩니다. (창구로 들어오는 요청은 스키마가 이미 형식을 보장합니다.)
+    """
+
+    if not reference_date:
+        return None
+    try:
+        return datetime.strptime(str(reference_date).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _normalize_date(value, reference_date: Optional[str] = None) -> Optional[str]:
+    """날짜가 진짜 'YYYY-MM-DD' 형식인지 확인합니다. 아니면 None.
+
+    기준일(reference_date)을 함께 주면 **기준일보다 이전 날짜도 None** 으로
+    둡니다. 지나간 날짜의 약속은 카드가 될 수 없기 때문입니다.
+
+    프롬프트 규칙 4 에도 "과거 약속은 반환하지 않는다" 가 있지만, 그것은 AI 에게
+    건네는 부탁이고 이것은 코드가 치는 그물입니다. 사용자가 보고 있는 수동 호출은
+    이상한 날짜가 나와도 사람이 고치지만, 배치(스케줄러)는 보는 사람이 없어서
+    그대로 저장됩니다. 정족수(_meets_quorum)를 프롬프트와 코드 양쪽에 둔 것과
+    같은 이유입니다.
+
+    기준일 '당일'은 남깁니다. 오늘 저녁 약속이 오늘 아침 배치에서 사라지면 안 됩니다.
+    """
 
     text = _clean_optional(value)
     if text is None:
         return None
     try:
-        datetime.strptime(text, "%Y-%m-%d")  # 형식이 맞는지 실제로 맞춰봅니다.
-        return text
+        parsed = datetime.strptime(text, "%Y-%m-%d").date()  # 형식 확인 겸 변환
     except ValueError:
         return None
+
+    reference = _parse_reference_date(reference_date)
+    if reference is not None and parsed < reference:
+        # 왜 date 가 비었는지 나중에 로그로 알 수 있어야 합니다.
+        logger.info(
+            "[검증] 기준일(%s)보다 이전 날짜라 date 를 null 로 둡니다 — %s",
+            reference,
+            text,
+        )
+        return None
+    return text
 
 
 def _normalize_time(value) -> Optional[str]:
@@ -163,19 +201,23 @@ def _normalize_time(value) -> Optional[str]:
         return None
 
 
-def to_card(data: dict) -> MeetingDraft:
+def to_card(data: dict, reference_date: Optional[str] = None) -> MeetingDraft:
     """읽어낸 데이터(dict)를 검사·정리해서 깔끔한 '약속 카드 초안' 으로 바꿉니다.
 
     (PRD AI-M1-06 응답 검증)
     - 약속 종류: 허용된 3종이 아니면 null
     - 날짜/시각: 형식이 틀리면 null
+    - 날짜: 기준일을 주면 기준일보다 이전이어도 null
     - 빈 문자열: null 로 변환
     - 장소: 앞뒤 공백 제거
+
+    reference_date 를 주지 않으면 과거 날짜 검사만 건너뜁니다. 나머지 검사는
+    그대로라서, 기준일이 없는 자리(단위 테스트 등)에서도 그냥 쓸 수 있습니다.
     """
 
     return MeetingDraft(
         meeting_type=_normalize_type(data.get("meeting_type")),
-        date=_normalize_date(data.get("date")),
+        date=_normalize_date(data.get("date"), reference_date),
         time=_normalize_time(data.get("time")),
         place=_clean_optional(data.get("place")),
     )
@@ -189,15 +231,21 @@ def _is_empty_card(card: MeetingDraft) -> bool:
     )
 
 
-def to_cards(items: List[dict]) -> List[MeetingDraft]:
+def to_cards(
+    items: List[dict],
+    reference_date: Optional[str] = None,
+) -> List[MeetingDraft]:
     """카드 dict 목록을 검사·정리해서 카드 초안 목록으로 바꿉니다.
 
     - 각 dict 를 to_card 로 검증·정리합니다.
     - 네 항목이 모두 null 인 빈 카드는 걸러냅니다. (약속 없음 -> 빈 목록)
       나들이에서 place 만 다르고 나머지는 채워진 카드는 그대로 남습니다.
+
+    기준일보다 이전 날짜는 to_card 에서 null 이 되므로, 날짜밖에 없던 과거
+    카드는 여기서 '빈 카드' 가 되어 자연히 사라집니다.
     """
 
-    cards = [to_card(item) for item in items]
+    cards = [to_card(item, reference_date) for item in items]
     return [c for c in cards if not _is_empty_card(c)]
 
 
@@ -254,9 +302,9 @@ def extract_meeting_drafts(
     data = parse_json(raw)
     logger.info("[추출 4/5] JSON 파싱 완료 — 후보 카드 %d개", len(data))
 
-    # 5) JSON 을 카드 초안 목록으로 변환·검사 (빈 카드 제거)
+    # 5) JSON 을 카드 초안 목록으로 변환·검사 (빈 카드 제거, 과거 날짜 제거)
     logger.info("[추출 5/5] 카드 변환·검증 시작")
-    cards = to_cards(data)
+    cards = to_cards(data, reference_date)
     logger.info(
         "[추출 5/5] 카드 완성 — %d개: %s",
         len(cards),

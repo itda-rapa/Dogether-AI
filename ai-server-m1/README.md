@@ -84,6 +84,34 @@ uvicorn app.main:app --reload --port 8000
 
 ## API
 
+### 공통 헤더 — `X-Request-Source` (선택)
+
+약속 카드 창구(v1·v2)는 요청 출처를 헤더로 받습니다. **로그에만 쓰이며 추출
+결과에는 전혀 영향을 주지 않습니다.** 값은 `manual`(사용자가 화면에서 직접
+누름) 또는 `scheduler`(배치가 자동으로 돎)이고, 없거나 모르는 값이면
+`unknown` 으로 기록됩니다. **모르는 값 때문에 요청이 거절되지는 않습니다.**
+
+```
+X-Request-Source: scheduler
+```
+
+이 값과 `room_id` 는 요청·성공·실패 로그에 함께 남습니다.
+
+```
+[v1 요청] room=room-1 source=scheduler — 메시지 30개
+[v1 완료] room=room-1 source=scheduler — 카드 1개
+[v1 실패] room=room-7 source=scheduler — AI 응답 시간 초과 (504)
+```
+
+**배치에는 이 로그가 사실상 필수입니다.** 응답은 카드 배열뿐이라 `room_id` 가
+되돌아가지 않아서, 방을 하나씩 도는 도중 어디서 실패했는지 알 방법이 로그밖에
+없습니다. 수동 호출은 사용자가 그 방을 보고 있지만 배치는 보는 사람이 없습니다.
+
+> 출처를 요청 **본문**이 아니라 헤더로 받는 이유는, 본문에 넣으면 v1/v2 요청
+> 규격이 바뀌어 기존 문서와 회귀 테스트가 함께 움직이기 때문입니다.
+> 그리고 **판단 로직은 이 값을 보지 않습니다** — 같은 대화면 누가 불렀든 같은
+> 카드가 나와야 "수동으로는 되는데 배치로는 안 된다" 가 생기지 않습니다.
+
 ### `POST /api/v1/meeting-drafts/extract`
 
 **요청**
@@ -128,6 +156,13 @@ uvicorn app.main:app --reload --port 8000
 - `meeting_type` 은 코드값: `WALK`(산책) / `PLAY`(나들이) / `HOSPITAL`(병원 동행) / `OTHER`(그 외) 중 하나이거나 `null`
 - `null` 이면 프론트에서 사용자가 종류를 직접 고릅니다
 - 대화에서 확인되지 않는 항목은 추측하지 않고 `null`
+- `date` 는 `YYYY-MM-DD`, `time` 은 `HH:MM`(24시간제)이며, **형식이 조금이라도
+  어긋나면 그 문자열을 내리지 않고 `null`** 로 둡니다. 백엔드가 `LocalDate.parse` /
+  `LocalTime.parse` 를 바로 걸어도 됩니다 (타임존은 붙지 않으므로 KST 로컬로 해석)
+- **`date` 가 `reference_date` 보다 이전이면 `null`** 입니다. 지나간 날짜의 약속은
+  카드가 될 수 없기 때문입니다. 기준일 **당일은 남습니다** — 오늘 저녁 약속이 오늘
+  아침 배치에서 사라지면 안 되니까요. 날짜밖에 없던 과거 카드는 네 항목이 모두
+  `null` 이 되어 목록에서 아예 빠집니다
 - **나들이에서 서로 다른 장소가 여러 곳** 확인되면, **장소마다 카드가 하나씩** 담겨 여러 개가 나옵니다. (산책·병원 동행은 대표 장소 1개로 카드 1개)
 
 **나들이 여러 장소 응답 `200`** (예)
@@ -340,6 +375,7 @@ app/
   routes/meeting.py                 # v1 API — 1:1 (요청 접수 + 오류 응답)
   routes/meeting_v2.py              # v2 API — 단체 채팅방
   routes/place_intent.py            # 지도 팝업 판단 API
+  routes/request_log.py             # 로그 꼬리표 (room_id + 요청 출처 헤더)
   schemas/meeting.py                # v1 입력/출력 규격
   schemas/meeting_v2.py             # v2 규격 (명부 + 카드별 참여자)
   schemas/place_intent.py           # 팝업 판단 규격 (좌표 없음)
