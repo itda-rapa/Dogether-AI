@@ -108,6 +108,47 @@ def test_quorum_drops_card_when_labels_are_unknown():
     assert to_cards_v2([_card(["P8", "P9"])], pmap) == []
 
 
+def test_to_cards_v2_drops_date_before_reference():
+    # 과거 날짜 방어가 v2 에서도 똑같이 걸리는지 확인합니다.
+    # (v1 의 to_card 를 그대로 쓰므로 규칙은 한 곳에만 있습니다.)
+    pmap = build_participant_map(FOUR)
+    cards = to_cards_v2(
+        [_card(["P1", "P2"], date="2026-07-01")],
+        pmap,
+        reference_date="2026-07-24",
+    )
+    assert len(cards) == 1
+    assert cards[0].date is None                       # 과거 날짜라 지워짐
+    assert cards[0].participant_ids == ["u-101", "u-102"]  # 참여자는 그대로
+
+
+def test_to_cards_v2_without_reference_date_skips_past_check():
+    # 기준일을 주지 않으면 과거 날짜 검사는 건너뜁니다. (기존 호출부 호환)
+    pmap = build_participant_map(FOUR)
+    cards = to_cards_v2([_card(["P1", "P2"], date="2020-01-01")], pmap)
+    assert cards[0].date == "2020-01-01"
+
+
+def test_extract_v2_passes_reference_date_to_past_check(monkeypatch):
+    # 전체 흐름에서도 기준일이 카드 변환까지 이어지는지 확인합니다.
+    fake_response = (
+        '[{"meeting_type": "WALK", "date": "2026-07-01", "time": "15:00", '
+        '"place": "중앙공원", "participants": ["P1", "P2"]}]'
+    )
+    monkeypatch.setattr(
+        meeting_extractor_v2, "chat_completion", lambda messages: fake_response
+    )
+
+    cards = extract_meeting_drafts_v2(
+        participants=FOUR,
+        messages=GROUP_MESSAGES,
+        reference_date="2026-07-24",
+    )
+    assert len(cards) == 1
+    assert cards[0].date is None
+    assert cards[0].time == "15:00"
+
+
 def test_to_cards_v2_drops_empty_card():
     # 네 항목이 모두 null 이면 참여자가 있어도 빈 카드라 걸러냅니다.
     pmap = build_participant_map(FOUR)

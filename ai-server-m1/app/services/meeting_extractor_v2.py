@@ -13,7 +13,7 @@ v1(1:1)과 하는 일은 같고, 앞뒤에 '이름표' 단계가 하나씩 더 �
 같은 규칙을 두 곳에서 관리하지 않기 위해서입니다.
 """
 
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 from app.logging_config import get_logger
 from app.prompts.meeting_prompt_v2 import SYSTEM_PROMPT_V2, build_user_prompt_v2
@@ -59,14 +59,19 @@ def _as_labels(value) -> List[str]:
     return []
 
 
-def to_card_v2(data: dict, participant_map: ParticipantMap) -> MeetingDraftV2:
+def to_card_v2(
+    data: dict,
+    participant_map: ParticipantMap,
+    reference_date: Optional[str] = None,
+) -> MeetingDraftV2:
     """카드 dict 하나를 검사·정리해서 v2 카드로 바꿉니다. (이름표 떼기 포함)
 
     종류·날짜·시각·장소 검사는 v1 의 to_card 가 그대로 합니다.
+    기준일보다 이전 날짜를 null 로 두는 것도 v1 과 같습니다.
     여기서는 participants(이름표)를 사용자 ID 로 되돌리는 일만 더 합니다.
     """
 
-    base = to_card(data)
+    base = to_card(data, reference_date)
     participant_ids = to_user_ids(_as_labels(data.get("participants")), participant_map)
     return MeetingDraftV2(**base.model_dump(), participant_ids=participant_ids)
 
@@ -85,15 +90,18 @@ def _meets_quorum(card: MeetingDraftV2) -> bool:
 def to_cards_v2(
     items: List[dict],
     participant_map: ParticipantMap,
+    reference_date: Optional[str] = None,
 ) -> List[MeetingDraftV2]:
     """카드 dict 목록을 v2 카드 목록으로 바꿉니다.
 
     두 가지를 걸러냅니다.
     - 네 항목이 전부 null 인 빈 카드 (v1 과 같음)
     - 참여자가 2명 미만인 카드 (정족수 미달 -> 약속이 아님)
+
+    기준일보다 이전 날짜가 null 이 되는 것도 v1 과 같습니다.
     """
 
-    cards = [to_card_v2(item, participant_map) for item in items]
+    cards = [to_card_v2(item, participant_map, reference_date) for item in items]
     kept: List[MeetingDraftV2] = []
     for card in cards:
         if _is_empty_card(card):
@@ -175,7 +183,7 @@ def extract_meeting_drafts_v2(
 
     # 6) 카드로 변환하면서 이름표를 원래 ID 로 되돌립니다.
     logger.info("[추출v2 6/6] 카드 변환·검증 시작")
-    cards = to_cards_v2(data, participant_map)
+    cards = to_cards_v2(data, participant_map, reference_date)
     logger.info(
         "[추출v2 6/6] 카드 완성 — %d개: %s",
         len(cards),

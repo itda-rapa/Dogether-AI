@@ -144,6 +144,79 @@ def test_to_cards_empty_when_no_meeting():
     assert to_cards(items) == []
 
 
+# --- 과거 날짜 방어 : 기준일보다 이전 날짜는 null ---
+#
+# 프롬프트 규칙 4 가 이미 "과거 약속은 반환하지 않는다" 이지만, 그것은 AI 에게
+# 건네는 부탁입니다. 배치(스케줄러)는 결과를 보는 사람이 없어서 AI 가 한 번
+# 실수하면 그대로 저장되므로, 코드에서도 한 번 더 막습니다.
+
+def test_to_card_drops_date_before_reference():
+    # 기준일보다 이전 날짜는 형식이 맞아도 null 이 되는지 확인합니다.
+    data = {"meeting_type": "WALK", "date": "2026-07-20", "place": "중앙공원"}
+    card = to_card(data, reference_date="2026-07-24")
+    assert card.date is None
+    # 날짜만 지워지고 나머지 항목은 그대로 남습니다.
+    assert card.meeting_type == "WALK"
+    assert card.place == "중앙공원"
+
+
+def test_to_card_keeps_reference_date_itself():
+    # 기준일 '당일'은 과거가 아니므로 남아야 합니다.
+    # (오늘 저녁 약속이 오늘 아침 배치에서 사라지면 안 됩니다.)
+    card = to_card({"date": "2026-07-24"}, reference_date="2026-07-24")
+    assert card.date == "2026-07-24"
+
+
+def test_to_card_keeps_future_date():
+    # 기준일보다 뒤인 날짜는 그대로 남는지 확인합니다.
+    card = to_card({"date": "2026-07-25"}, reference_date="2026-07-24")
+    assert card.date == "2026-07-25"
+
+
+def test_to_card_without_reference_date_skips_past_check():
+    # 기준일을 주지 않으면 과거 날짜 검사는 건너뜁니다. (형식 검사는 그대로)
+    assert to_card({"date": "2020-01-01"}).date == "2020-01-01"
+
+
+def test_to_card_ignores_broken_reference_date():
+    # 기준일 형식이 깨져 있으면 검사를 건너뜁니다.
+    # 기준일이 원인인 문제를 카드 쪽에서 찾게 만들지 않기 위해서입니다.
+    card = to_card({"date": "2020-01-01"}, reference_date="2026/07/24")
+    assert card.date == "2020-01-01"
+
+
+def test_to_cards_drops_card_that_had_only_past_date():
+    # 날짜밖에 없던 과거 카드는 date 가 null 이 되면서 '빈 카드' 가 되어 사라집니다.
+    items = [
+        {"meeting_type": None, "date": "2026-07-01", "time": None, "place": None},
+        {"meeting_type": "WALK", "date": "2026-07-25", "time": None, "place": None},
+    ]
+    cards = to_cards(items, reference_date="2026-07-24")
+    assert len(cards) == 1
+    assert cards[0].date == "2026-07-25"
+
+
+def test_extract_passes_reference_date_to_past_check(monkeypatch):
+    # 전체 흐름에서도 기준일이 카드 변환까지 이어지는지 확인합니다.
+    # (여기가 끊어져 있으면 단위 테스트만 통과하고 실제로는 막히지 않습니다.)
+    fake_response = (
+        '[{"meeting_type": "WALK", "date": "2026-07-01", '
+        '"time": "19:00", "place": "중앙공원"}]'
+    )
+    monkeypatch.setattr(
+        meeting_extractor, "chat_completion", lambda messages: fake_response
+    )
+
+    messages = [
+        _msg("초코 보호자", "지난주에 중앙공원에서 산책했었죠"),
+        _msg("보리 보호자", "네, 즐거웠어요"),
+    ]
+    cards = extract_meeting_drafts(messages, reference_date="2026-07-24")
+    assert len(cards) == 1
+    assert cards[0].date is None       # 과거 날짜라 지워짐
+    assert cards[0].time == "19:00"    # 나머지는 그대로
+
+
 # --- extract_meeting_drafts : 전체 흐름 ---
 
 def test_extract_meeting_drafts_happy_path(monkeypatch):

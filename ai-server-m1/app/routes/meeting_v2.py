@@ -7,10 +7,15 @@ v1(1:1) 창구는 그대로 두고, 단체 채팅방용 창구를 옆에 새로 
 - 502 : AI 호출 실패 / 답을 카드로 못 바꿈
 - 504 : AI 응답 시간 초과
 - 422 : 요청 형식이 잘못됨 (메시지 2개 미만/200개 초과 등, FastAPI 가 자동 처리)
+
+들어온 요청과 그 결과는 v1 과 똑같이 **방 ID·요청 출처와 함께** 로그에 남깁니다.
+(routes/request_log.py)
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.logging_config import get_logger
+from app.routes.request_log import get_request_source, request_tag
 from app.schemas.meeting import ErrorResponse
 from app.schemas.meeting_v2 import MeetingDraftV2, MeetingDraftV2Request
 from app.services.gemma_client import GemmaError, GemmaTimeoutError
@@ -20,6 +25,8 @@ from app.services.participant_mapper import ParticipantMappingError
 
 # 실제 주소는 "/api/v2/meeting-drafts/extract" 가 됩니다.
 router = APIRouter(prefix="/api/v2/meeting-drafts", tags=["meeting-drafts-v2"])
+
+logger = get_logger(__name__)
 
 
 @router.post(
@@ -33,12 +40,25 @@ router = APIRouter(prefix="/api/v2/meeting-drafts", tags=["meeting-drafts-v2"])
         422: {"model": ErrorResponse, "description": "요청 형식 오류 (메시지 개수 등)"},
     },
 )
-def extract(request: MeetingDraftV2Request) -> list[MeetingDraftV2]:
+def extract(
+    request: MeetingDraftV2Request,
+    source: str = Depends(get_request_source),
+) -> list[MeetingDraftV2]:
     """단체 채팅방 대화를 받아서 약속 카드 초안(들)을 만들어 돌려줍니다.
 
     카드마다 그 약속에 속한 사람들의 ID(participant_ids)가 함께 담깁니다.
     백엔드는 여기 담긴 사람에게만 알림을 보내면 됩니다.
+
+    source 는 X-Request-Source 헤더에서 온 '요청 출처' 이며 **로그에만** 씁니다.
     """
+
+    tag = request_tag(request.room_id, source)
+    logger.info(
+        "[v2 요청] %s — 명부 %d명, 메시지 %d개",
+        tag,
+        len(request.participants),
+        len(request.messages),
+    )
 
     try:
         drafts = extract_meeting_drafts_v2(
@@ -49,6 +69,7 @@ def extract(request: MeetingDraftV2Request) -> list[MeetingDraftV2]:
     except ParticipantMappingError as exc:
         # 명부가 규칙에 안 맞음 (3명 미만 / 빈 ID / ID 중복) -> 400
         # 보낸 쪽이 고쳐야 하는 문제라 AI 를 부르기 전에 여기서 끝냅니다.
+        logger.warning("[v2 실패] %s — 명부 오류 (400): %s", tag, exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"참여자 명부가 올바르지 않아요: {exc}",
@@ -56,21 +77,25 @@ def extract(request: MeetingDraftV2Request) -> list[MeetingDraftV2]:
     except GemmaTimeoutError as exc:
         # AI 응답 시간 초과 -> 504
         # (GemmaError 의 자식이라 반드시 GemmaError 보다 먼저 잡아야 합니다.)
+        logger.warning("[v2 실패] %s — AI 응답 시간 초과 (504)", tag)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=f"AI 응답 시간이 초과됐어요: {exc}",
         ) from exc
     except GemmaError as exc:
         # AI 쪽 문제(연결 안 됨, 인증 실패 등) -> 502
+        logger.warning("[v2 실패] %s — AI 호출 실패 (502): %s", tag, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"AI 모델을 부르는 데 실패했어요: {exc}",
         ) from exc
     except ExtractionError as exc:
         # AI 답을 카드 형식으로 바꾸지 못한 경우 -> 502 (응답 변환 실패)
+        logger.warning("[v2 실패] %s — 카드 변환 실패 (502): %s", tag, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"AI 응답을 카드로 바꾸지 못했어요: {exc}",
         ) from exc
 
+    logger.info("[v2 완료] %s — 카드 %d개", tag, len(drafts))
     return drafts
