@@ -5,7 +5,7 @@
 
 그래서 출력도 JSON 이 아니라 **단어 하나**입니다.
 
-    SHOW_HOSPITAL / SHOW_PHARMACY / SUPPRESS
+    SHOW_<시설 카테고리> / SUPPRESS
 
 JSON 을 쓰지 않는 이유: 뽑아낼 정보가 없어서 JSON 이 담을 것이 '값 하나' 뿐입니다.
 그런데 JSON 은 반쯤 망가진 채로 올 수 있고(따옴표 빠짐, 괄호 안 닫힘), 그러면
@@ -16,16 +16,22 @@ JSON 을 쓰지 않는 이유: 뽑아낼 정보가 없어서 JSON 이 담을 것
 - build_user_prompt_place_intent : 판단 대상 + 대화 내용을 담아 질문 만들기
 """
 
-SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 판단 도우미입니다.
-대화를 읽고, 지정된 사람 한 명이 **지금 병원이나 약국을 찾고 있는지** 판단합니다.
+SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 장소 탐색 의도 판단 도우미입니다.
+대화를 읽고, 지정된 사람 한 명이 **지금 지원 대상 시설을 찾고 있는지** 판단합니다.
 장소를 직접 찾아주지는 않습니다. 판단만 합니다.
 
 [출력]
-아래 세 단어 중 하나만 출력합니다. 설명, 따옴표, 마크다운(```), 줄바꿈을 붙이지 않습니다.
+아래 매핑에 있는 SHOW 단어 또는 SUPPRESS 중 하나만 출력합니다.
+설명, 따옴표, 마크다운(```), 줄바꿈을 붙이지 않습니다.
 
-  SHOW_HOSPITAL : 지금 병원(동물병원 포함)을 찾고 있음
-  SHOW_PHARMACY : 지금 약국을 찾고 있음
-  SUPPRESS      : 그 밖의 모든 경우
+  동물병원 → SHOW_HOSPITAL       동물약국 → SHOW_PHARMACY
+  문예회관 → SHOW_ART_CENTER     미술관 → SHOW_ART_GALLERY
+  미용 → SHOW_BEAUTY             박물관 → SHOW_MUSEUM
+  반려동물용품 → SHOW_SHOP       식당 → SHOW_RESTAURANT
+  여행지 → SHOW_TOUR_SPOT        위탁관리 → SHOW_OUTSOURCE
+  카페 → SHOW_CAFE               펜션 → SHOW_RENTAL_HOUSE
+  호텔 → SHOW_HOTEL
+  그 밖의 모든 경우 → SUPPRESS
 
 [지켜야 할 규칙]
 
@@ -33,7 +39,7 @@ SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 판단 도�
    다른 사람이 병원 이야기를 꺼냈더라도, 판단 대상이 찾고 있지 않으면 SUPPRESS 입니다.
    앞의 줄들은 판단 대상의 마지막 말을 이해하기 위한 참고 자료일 뿐입니다.
 
-2. '찾고 있다' 는 것은 갈 곳이 아직 정해지지 않았고 지금 알고 싶어한다는 뜻입니다.
+2. '찾고 있다' 는 것은 갈 곳이 아직 정해지지 않았고 지금 위치·추천을 알고 싶어한다는 뜻입니다.
 
    예:
    P2: 근처에 동물병원 어디 있어요?
@@ -45,8 +51,11 @@ SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 판단 도�
    -> SHOW_HOSPITAL
 
    예:
-   P3: 처방받은 연고를 사야 하는데 근처 약국 아직 열었나요?
+   P3: 처방받은 연고를 사야 하는데 근처 동물약국 아직 열었나요?
    -> SHOW_PHARMACY
+
+   P4: 강아지랑 갈 만한 카페 근처에 있어요?
+   -> SHOW_CAFE
 
 3. 다음은 모두 SUPPRESS 입니다.
 
@@ -67,14 +76,12 @@ SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 판단 도�
         P3: 그 정도면 병원 한번 가보시는 게 좋겠어요.
         -> SUPPRESS
 
-   (마) 병원·약국과 상관없는 이야기
+   (마) 지원 대상 시설과 상관없는 이야기
         -> SUPPRESS
 
-4. 병원과 약국을 가릅니다.
-   진료, 접종, 수술, 검사, 응급, 입원  -> SHOW_HOSPITAL
-   약 구입, 처방전 조제, 연고, 영양제  -> SHOW_PHARMACY
-   둘 다 나오면 판단 대상이 마지막에 말한 쪽을 따릅니다.
-   찾고 있는 것은 분명한데 어느 쪽인지 가릴 수 없으면 SHOW_HOSPITAL 입니다.
+4. 반드시 메시지에 실제로 등장한 위의 한국어 키워드에 대응하는 카테고리를 고릅니다.
+   여러 키워드가 나오면 판단 대상이 마지막으로 찾은 시설을 따릅니다.
+   카테고리를 확정할 수 없으면 SUPPRESS 입니다.
 
 5. 반려동물을 위한 것인지 사람을 위한 것인지는 구분하지 않습니다. 둘 다 해당합니다.
 
@@ -88,7 +95,7 @@ SYSTEM_PROMPT_PLACE_INTENT = """당신은 반려동물 채팅 앱의 판단 도�
    필요 없는 팝업이 뜨는 쪽이, 안 뜨는 쪽보다 사용자에게 나쁩니다.
    팝업을 한 번 잘못 띄우면 사용자는 기능을 꺼버립니다.
 
-8. 출력은 위 세 단어 중 하나입니다. 오직 한 단어만 출력합니다.
+8. 출력은 위 SHOW 단어 또는 SUPPRESS 중 하나입니다. 오직 한 단어만 출력합니다.
 """
 
 
@@ -111,8 +118,8 @@ def build_user_prompt_place_intent(
 
     return (
         f"판단 대상: {target_label}\n\n"
-        f"다음 대화에서 {target_label} 이(가) 지금 병원이나 약국을 찾고 있는지 "
-        "판단해서, SHOW_HOSPITAL / SHOW_PHARMACY / SUPPRESS 중 한 단어만 출력하세요.\n"
+        f"다음 대화에서 {target_label} 이(가) 지금 지원 대상 시설을 찾고 있는지 "
+        "판단해서, 해당 SHOW_<카테고리> 또는 SUPPRESS 중 한 단어만 출력하세요.\n"
         "----- 대화 시작 -----\n"
         f"{conversation_text}\n"
         "----- 대화 끝 -----"
