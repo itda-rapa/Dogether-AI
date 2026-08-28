@@ -62,6 +62,8 @@ def _fake_answer(monkeypatch, answer: str) -> dict:
     [
         ("SHOW_HOSPITAL", "SHOW", "HOSPITAL"),
         ("SHOW_PHARMACY", "SHOW", "PHARMACY"),
+        ("SHOW_CAFE", "SHOW", "CAFE"),
+        ("SHOW_ART_CENTER", "SHOW", "ART_CENTER"),
         ("SUPPRESS", "SUPPRESS", None),
         # 앞뒤에 군더더기가 붙어 와도 읽어냅니다.
         ("  show_hospital\n", "SHOW", "HOSPITAL"),
@@ -149,10 +151,15 @@ def test_decide_allows_two_person_room(monkeypatch):
     assert result.decision == "SHOW"
 
 
-def test_decide_rejects_single_person_room():
-    # 혼자 있는 방은 대화가 아닙니다. (-> 400)
-    with pytest.raises(ParticipantMappingError):
-        decide_place_intent(["u-101"], [_msg("u-101", "병원 어디에요?")], "u-101")
+def test_decide_allows_single_person_room(monkeypatch):
+    _fake_answer(monkeypatch, "SHOW_CAFE")
+
+    result = decide_place_intent(
+        ["u-101"], [_msg("u-101", "근처 카페 어디에요?")], "u-101"
+    )
+
+    assert result.decision == "SHOW"
+    assert result.place_type == "CAFE"
 
 
 def test_decide_rejects_trigger_outside_roster():

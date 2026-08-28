@@ -35,10 +35,9 @@ from app.prompts.place_intent_prompt import (
 )
 from app.schemas.meeting_v2 import MessageV2
 from app.schemas.place_intent import (
+    ALLOWED_PLACE_TYPES,
     DECISION_SHOW,
     DECISION_SUPPRESS,
-    PLACE_TYPE_HOSPITAL,
-    PLACE_TYPE_PHARMACY,
     PlaceIntentDecision,
 )
 from app.services.gemma_client import GemmaError, GemmaTimeoutError, chat_completion
@@ -50,14 +49,13 @@ from app.services.participant_mapper import (
 
 logger = get_logger(__name__)
 
-# 이 판단에 필요한 최소 인원입니다. 1:1 방(2명)에서도 팝업은 떠야 합니다.
+# 이 판단에 필요한 최소 인원입니다. 혼자 있는 오픈채팅방에서도 팝업은 떠야 합니다.
 # 약속 추출(v2)의 3명과 다른 값이며, 그래서 build_participant_map 에 넘겨줍니다.
-MIN_ROOM_PARTICIPANTS = 2
+MIN_ROOM_PARTICIPANTS = 1
 
 # 모델이 낼 수 있는 답과 그 뜻입니다.
 _SHOW_TOKENS = {
-    "SHOW_HOSPITAL": PLACE_TYPE_HOSPITAL,
-    "SHOW_PHARMACY": PLACE_TYPE_PHARMACY,
+    f"SHOW_{place_type}": place_type for place_type in ALLOWED_PLACE_TYPES
 }
 _SUPPRESS_TOKEN = "SUPPRESS"
 _KNOWN_TOKENS = (*_SHOW_TOKENS, _SUPPRESS_TOKEN)
@@ -131,7 +129,7 @@ def decide_place_intent(
 ) -> PlaceIntentDecision:
     """팝업을 띄울지 판단하는 '메인 함수' 입니다.
 
-    participants: 방에 있는 사람들의 사용자 ID 목록 (2명 이상)
+    participants: 방에 있는 사람들의 사용자 ID 목록 (1명 이상)
     messages: 키워드가 들어있는 메시지 + 바로 앞 대화 (마지막 줄이 키워드 메시지)
     trigger_sender_id: 키워드를 말한 사람. 팝업은 이 사람에게만 뜹니다.
 
@@ -144,7 +142,7 @@ def decide_place_intent(
 
     target_id = trigger_sender_id.strip()
 
-    # 1) 명부로 이름표 대응표를 만듭니다. (2명 미만이면 여기서 거절됩니다)
+    # 1) 명부로 이름표 대응표를 만듭니다. (비어 있으면 여기서 거절됩니다)
     logger.info("[지도판단 1/5] 이름표 대응표 생성 — 명부 %d명", len(participants))
     participant_map = build_participant_map(participants, min_size=MIN_ROOM_PARTICIPANTS)
 

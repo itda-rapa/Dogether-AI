@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.routes import meeting, meeting_v2, place_intent, risk_signal
+from app.routes import meeting, meeting_v2, place_intent, risk_signal, route_intent
 
 
 def create_app() -> FastAPI:
@@ -42,6 +42,9 @@ def create_app() -> FastAPI:
     # 규칙 필터에 걸린 메시지를 맥락과 함께 판단하는 창구입니다. (M3_FLOW 5-3 ②)
     # 규칙에 걸린 것만 여기로 옵니다. 상시 감시가 아닙니다. (5-6 원칙 4)
     app.include_router(risk_signal.router)
+
+    # 사용자가 오픈채팅방에서 요청했을 때 최근 대화로 새 운동 경로를 구성합니다.
+    app.include_router(route_intent.router)
 
     # 서버가 잘 살아있는지 확인하는 간단한 주소입니다.
     # 브라우저에서 /health 로 들어가면 "ok" 라고 답해 줍니다.

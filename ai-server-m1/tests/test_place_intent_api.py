@@ -74,6 +74,15 @@ def test_decide_show(client, monkeypatch):
     }
 
 
+def test_decide_show_cafe(client, monkeypatch):
+    _fake_decision(monkeypatch, "SHOW", "CAFE")
+
+    resp = client.post(DECIDE_URL, json=_body())
+
+    assert resp.status_code == 200
+    assert resp.json()["place_type"] == "CAFE"
+
+
 def test_decide_suppress(client, monkeypatch):
     _fake_decision(monkeypatch, "SUPPRESS")
 
@@ -103,6 +112,20 @@ def test_decide_accepts_two_person_room(client, monkeypatch):
     )
     resp = client.post(DECIDE_URL, json=body)
     assert resp.status_code == 200
+
+
+def test_decide_accepts_one_person_open_chat_room(client, monkeypatch):
+    _fake_decision(monkeypatch, "SHOW", "HOSPITAL")
+
+    body = _body(
+        [_message("u-101", "근처에 병원 어디 있어요?")],
+        participants=["u-101"],
+        trigger="u-101",
+    )
+    resp = client.post(DECIDE_URL, json=body)
+
+    assert resp.status_code == 200
+    assert resp.json()["decision"] == "SHOW"
 
 
 def test_decide_rejects_too_many_messages(client):
