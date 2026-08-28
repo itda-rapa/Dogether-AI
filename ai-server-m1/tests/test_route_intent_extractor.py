@@ -95,6 +95,35 @@ def test_explicit_point_route_preserves_place_starting_with_particle_character(m
     assert result.activity_type == "RUN"
 
 
+def test_explicit_point_route_removes_calendar_date_from_start(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.route_intent_extractor.chat_completion",
+        lambda _: (_ for _ in ()).throw(AssertionError("model must not be called")),
+    )
+    result = extract_route_intent(
+        _messages("9월 4일에 판교역에서 출발해서 이매역을 경유해서 서현역까지 달리실래요?")
+    )
+    assert result.status == "READY"
+    assert result.start.query == "판교역"
+    assert [point.query for point in result.waypoints] == ["이매역"]
+    assert result.destination.query == "서현역"
+    assert result.activity_type == "RUN"
+
+
+def test_model_place_is_normalized_after_conversation_validation():
+    result = to_route_intent(
+        {
+            "route_mode": "POINTS",
+            "activity_type": "RUN",
+            "start": {"query": "9월 4일에 판교역"},
+            "waypoints": [{"query": "이매역"}],
+            "destination": {"query": "서현역"},
+        },
+        _messages("9월 4일에 판교역에서 출발해서 이매역을 경유해서 서현역까지 달리실래요?"),
+    )
+    assert result.start.query == "판교역"
+
+
 def test_insufficient_context_lists_missing_information():
     result = to_route_intent(
         {"activity_type": "산책", "start": {"query": "서울숲"}},

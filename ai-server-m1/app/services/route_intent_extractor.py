@@ -21,7 +21,8 @@ _ACTIVITY_CODES = {
 }
 
 _TEMPORAL_PREFIX = re.compile(
-    r"^(?:(?:오늘|내일|모레|글피|이틀\s*후|사흘\s*후)(?:에|부터)?\s*)+"
+    r"^(?:(?:(?:오늘|내일|모레|글피|이틀\s*후|사흘\s*후)(?:에|부터)?"
+    r"|\d{1,2}월\s*\d{1,2}일(?:에|부터)?)\s*)+"
 )
 _TIME_PREFIX = re.compile(
     r"^(?:(?:오전|오후|아침|저녁|밤|새벽)\s*)?"
@@ -54,6 +55,7 @@ def _place(value, conversation: Optional[str] = None) -> Optional[RoutePlaceQuer
     # 모델이 대화에 없던 장소를 보충하지 못하게 코드에서도 차단합니다.
     if conversation is not None and query not in conversation:
         return None
+    query = _clean_place(query)
     return RoutePlaceQuery(query=query) if query else None
 
 
